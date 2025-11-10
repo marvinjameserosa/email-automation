@@ -1,9 +1,9 @@
-import Image from "next/image";
+import TemplateEditor from "@/components/TemplateEditor";
 
 export default function Home() {
   return (
-    <>
-      <h1>Welcome to Automail</h1>
-    </>
+    <main className="p-4">
+      <TemplateEditor />
+    </main>
   );
 }
