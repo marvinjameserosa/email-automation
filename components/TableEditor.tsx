@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useCallback, useRef, useState } from "react";
+import { useTableData } from "@/contexts/TableDataContext";
+import { CheckCircle, Plus, Download, Save, Trash2, Send, X } from "lucide-react";
 
 /*
   TableEditor usage notes:
@@ -42,9 +44,7 @@ function parseCSV(text: string): string[][] {
 }
 
 export default function TableEditor() {
-  const [data, setData] = useState<string[][]>([]);
-  const [headers, setHeaders] = useState<string[]>([]);
-  const [fileInfo, setFileInfo] = useState<{ name: string; size: number } | null>(null);
+  const { data, headers, fileInfo, setData, setHeaders, setFileInfo, clearTableData } = useTableData();
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -188,13 +188,12 @@ export default function TableEditor() {
 
   return (
     <div className="min-h-screen bg-white text-slate-900" style={{ fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto" }}>
-      {/* Top nav / breadcrumb */}
-      <header className="border-b py-4 px-6 flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <div className="text-lg font-semibold">AutoMail</div>
-          <div className="text-sm text-slate-500">Dashboard / Table Editor</div>
+      {/* Page header */}
+      <header className="border-b py-4 px-6">
+        <div className="max-w-7xl mx-auto">
+          <h1 className="text-2xl font-semibold text-gray-900">Table Editor</h1>
+          <p className="text-sm text-slate-500 mt-1">Upload, preview, and edit your recipient data before sending.</p>
         </div>
-        <div className="text-sm text-slate-500">Upload, preview, and edit your recipient data before sending.</div>
       </header>
 
       {/* Main content */}
@@ -229,13 +228,32 @@ export default function TableEditor() {
             {/* Toolbar */}
             <div className="flex items-center justify-between mt-6">
               <div className="flex items-center space-x-3">
-                  <button onClick={validateData} style={{ border: `1px solid ${accent}` }} className="px-3 py-2 rounded-md text-sm font-medium">✅ Validate Data</button>
-                  <button onClick={addColumn} className="px-3 py-2 rounded-md text-sm border">➕ Add Column</button>
-                  <button onClick={exportCSV} className="px-3 py-2 rounded-md text-sm border">⬇️ Export CSV</button>
-                  <button onClick={saveChanges} style={{ background: accent }} className="px-3 py-2 rounded-md text-sm font-medium text-white">💾 Save Changes</button>
+                  <button onClick={validateData} style={{ border: `1px solid ${accent}` }} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium">
+                    <CheckCircle size={16} />
+                    Validate Data
+                  </button>
+                  <button onClick={addColumn} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border">
+                    <Plus size={16} />
+                    Add Column
+                  </button>
+                  <button onClick={exportCSV} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border">
+                    <Download size={16} />
+                    Export CSV
+                  </button>
+                  <button onClick={saveChanges} style={{ background: accent }} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-white">
+                    <Save size={16} />
+                    Save Changes
+                  </button>
+                  <button onClick={() => { clearTableData(); setErrors([]); setNotice(null); }} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-red-500 text-red-600 hover:bg-red-50">
+                    <Trash2 size={16} />
+                    Clear All
+                  </button>
                 </div>
               <div>
-                <button onClick={continueToSend} style={{ background: accent }} className="px-4 py-2 rounded-md text-sm font-medium text-white">📤 Continue to Send</button>
+                <button onClick={continueToSend} style={{ background: accent }} className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white">
+                  <Send size={16} />
+                  Continue to Send
+                </button>
               </div>
             </div>
 
@@ -280,9 +298,9 @@ export default function TableEditor() {
                                 removeColumn(ci);
                               }}
                               title="Remove column"
-                              className="text-red-500 text-sm px-1"
+                              className="text-red-500 text-sm px-1 hover:bg-red-50 rounded"
                             >
-                              ✖
+                              <X size={14} />
                             </button>
                           </div>
                         </th>
@@ -312,7 +330,10 @@ export default function TableEditor() {
               <div className="p-4 border-t bg-white flex items-center justify-between">
                 <div className="text-sm text-slate-600">Rows: {data.length} · Columns: {headers.length}</div>
                 <div>
-                  <button onClick={addRow} className="px-3 py-1 text-sm rounded border">+ Add row</button>
+                  <button onClick={addRow} className="flex items-center gap-1 px-3 py-1 text-sm rounded border hover:bg-gray-50">
+                    <Plus size={14} />
+                    Add row
+                  </button>
                 </div>
               </div>
             </div>
@@ -328,7 +349,7 @@ export default function TableEditor() {
                 <div className="mt-2">Errors: <strong className="text-red-600">{errors.length}</strong></div>
               </div>
               <div className="mt-4">
-                <button onClick={() => { setData([]); setHeaders([]); setFileInfo(null); setErrors([]); }} className="w-full px-3 py-2 rounded-md border text-sm">Re-upload CSV</button>
+                <button onClick={() => { clearTableData(); setErrors([]); }} className="w-full px-3 py-2 rounded-md border text-sm">Re-upload CSV</button>
               </div>
             </div>
           </aside>
