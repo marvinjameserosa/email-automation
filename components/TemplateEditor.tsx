@@ -31,6 +31,9 @@ export default function TemplateEditor() {
 	const editableRef = useRef<HTMLDivElement>(null);
 	const iframeRef = useRef<HTMLIFrameElement>(null);
 	const [isSaving, setIsSaving] = useState(false);
+	const [lastSaved, setLastSaved] = useState<Date | null>(null);
+	const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+	const [originalContent, setOriginalContent] = useState<{subject: string, message: string} | null>(null);
 
 	// load templates once on mount
 	useEffect(() => {
@@ -70,6 +73,11 @@ export default function TemplateEditor() {
 				setSelectedId(htmlTemplates[0].id);
 				setSubject(htmlTemplates[0].subject || 'Subject');
 				setMessage(htmlTemplates[0].message || 'Pick a template / Make a message');
+				// Store original content when initially loading
+				setOriginalContent({ 
+					subject: htmlTemplates[0].subject || 'Subject', 
+					message: htmlTemplates[0].message || 'Pick a template / Make a message' 
+				});
 			}
 		}
 		
@@ -83,15 +91,105 @@ export default function TemplateEditor() {
 		return () => document.removeEventListener('click', handleClick);
 	}, []);
 
+	// Autosave functionality - triggers 2 seconds after user stops typing
+	useEffect(() => {
+		// Don't autosave if no template is selected or if saving is in progress
+		if (!selectedId || isSaving) return;
+
+		// Check if content has actually changed
+		if (originalContent && 
+			originalContent.subject === subject && 
+			originalContent.message === message) {
+			return; // No changes, don't autosave
+		}
+
+		// Clear existing timeout
+		if (autoSaveTimeoutRef.current) {
+			clearTimeout(autoSaveTimeoutRef.current);
+		}
+
+		// Set new timeout for autosave (2 seconds after last change)
+		autoSaveTimeoutRef.current = setTimeout(() => {
+			autoSaveCurrentTemplate();
+		}, 2000);
+
+		// Cleanup timeout on unmount or when dependencies change
+		return () => {
+			if (autoSaveTimeoutRef.current) {
+				clearTimeout(autoSaveTimeoutRef.current);
+			}
+		};
+	}, [subject, message, selectedId, isSaving]);
+
+	// Autosave function
+	function autoSaveCurrentTemplate() {
+		if (!selectedId) return;
+		
+		const currentTemplate = templates.find(t => t.id === selectedId);
+		if (!currentTemplate?.filename) return;
+
+		setIsSaving(true);
+		
+		// Delete old file and create new one with same name
+		fetch(`/api/templates?filename=${currentTemplate.filename}`, {
+			method: 'DELETE'
+		})
+		.then(() => {
+			return fetch('/api/templates', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ 
+					name: currentTemplate.name, 
+					subject, 
+					message 
+				})
+			});
+		})
+		.then(res => res.json())
+		.then(data => {
+			if (data.success) {
+				setLastSaved(new Date());
+				// Update original content to reflect the saved state
+				setOriginalContent({ subject, message });
+				return fetch('/api/templates');
+			} else {
+				throw new Error(data.error || 'Failed to autosave');
+			}
+		})
+		.then(res => res.json())
+		.then(data => {
+			const newTemplates: Template[] = data.templates.map((t: any) => ({
+				id: t.id,
+				name: t.name,
+				subject: t.subject,
+				message: t.message,
+				createdAt: Date.now(),
+				filename: t.filename
+			}));
+			setTemplates(newTemplates);
+		})
+		.catch(error => {
+			console.error('Error autosaving template:', error);
+		})
+		.finally(() => {
+			setIsSaving(false);
+		});
+	}
+
 	const currentMessage = isEditingInPreview ? previewMessage : message;
 	
 	// Check if message contains full HTML document (not just HTML tags)
 	const isHtmlTemplate = currentMessage.trim().startsWith('<!DOCTYPE') || currentMessage.trim().startsWith('<html');
 
+	// Check if there are unsaved changes
+	const hasUnsavedChanges = originalContent && 
+		(originalContent.subject !== subject || originalContent.message !== message);
+
 	function createNewTemplate() {
 		setSelectedId(null);
 		setSubject('Subject');
 		setMessage('Pick a template / Make a message');
+		setOriginalContent(null); // Clear original content for new template
 	}
 
 	function saveAsNew(name?: string) {
@@ -205,6 +303,8 @@ export default function TemplateEditor() {
 		setSelectedId(id);
 		setSubject(t.subject);
 		setMessage(t.message);
+		// Store original content when loading a template
+		setOriginalContent({ subject: t.subject, message: t.message });
 	}
 
 	function deleteTemplate(id: string) {
@@ -458,7 +558,22 @@ export default function TemplateEditor() {
 					<div className="flex items-center justify-between mb-4">
 						<div>
 							<h2 className="text-2xl font-semibold">Template Editor</h2>
-							<p className="text-sm text-gray-500">Create and preview the email template that will be sent to recipients.</p>
+							<p className="text-sm text-gray-500">
+								Create and preview the email template that will be sent to recipients.
+								{selectedId && (
+									<span className="ml-2 text-xs">
+										{isSaving ? (
+											<span className="text-blue-600">● Saving...</span>
+										) : hasUnsavedChanges ? (
+											<span className="text-amber-600">● Unsaved changes</span>
+										) : lastSaved ? (
+											<span className="text-green-600">● Saved at {lastSaved.toLocaleTimeString()}</span>
+										) : (
+											<span className="text-gray-400">● Autosave enabled</span>
+										)}
+									</span>
+								)}
+							</p>
 						</div>
 						<div className="flex items-center gap-3">
 							<button 
@@ -466,14 +581,7 @@ export default function TemplateEditor() {
 								disabled={isSaving}
 								className="px-3 py-2 text-sm bg-white border border-gray-200 rounded-md cursor-pointer hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
 							>
-								{isSaving ? 'Saving...' : 'Save as new'}
-							</button>
-							<button 
-								onClick={() => overwriteSelected()} 
-								disabled={isSaving}
-								className="px-3 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-md cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-							>
-								{isSaving ? 'Saving...' : 'Save'}
+								{isSaving ? 'Saving...' : 'Save as new Template'}
 							</button>
 						</div>
 					</div>
