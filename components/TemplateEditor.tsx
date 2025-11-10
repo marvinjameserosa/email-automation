@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Trash2, Edit, Copy, FolderOpen, Bold, Italic, Underline, Link, List, ListOrdered, Plus } from 'lucide-react';
+import { Trash2, Edit, FolderOpen, Bold, Italic, Underline, Link, List, ListOrdered, Plus, Variable, FileDown } from 'lucide-react';
+import { useTableData } from '@/contexts/TableDataContext';
 
 type Template = {
 	id: string;
@@ -19,6 +20,7 @@ type ContextMenu = {
 } | null;
 
 export default function TemplateEditor() {
+	const { headers } = useTableData();
 	const [subject, setSubject] = useState('Subject');
 	const [message, setMessage] = useState('Pick a template / Make a message');
 	const [templates, setTemplates] = useState<Template[]>([]);
@@ -30,6 +32,10 @@ export default function TemplateEditor() {
 	const [lastSaved, setLastSaved] = useState<Date | null>(null);
 	const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 	const [originalContent, setOriginalContent] = useState<{subject: string, message: string} | null>(null);
+	const [showVariableMenu, setShowVariableMenu] = useState(false);
+	const [variableMenuTarget, setVariableMenuTarget] = useState<'subject' | 'message'>('message');
+	const subjectInputRef = useRef<HTMLInputElement>(null);
+	const messageTextareaRef = useRef<HTMLTextAreaElement>(null);
 
 	// load templates once on mount
 	useEffect(() => {
@@ -366,9 +372,79 @@ export default function TemplateEditor() {
 		}
 	}
 
+	function insertVariable(variable: string, target: 'subject' | 'message') {
+		const variableText = `{{${variable}}}`;
+		
+		if (target === 'subject' && subjectInputRef.current) {
+			const input = subjectInputRef.current;
+			const start = input.selectionStart || 0;
+			const end = input.selectionEnd || 0;
+			const newValue = subject.slice(0, start) + variableText + subject.slice(end);
+			setSubject(newValue);
+			// Set cursor position after inserted variable
+			setTimeout(() => {
+				input.focus();
+				input.setSelectionRange(start + variableText.length, start + variableText.length);
+			}, 0);
+		} else if (target === 'message' && !isHtmlTemplate && messageTextareaRef.current) {
+			const textarea = messageTextareaRef.current;
+			const start = textarea.selectionStart || 0;
+			const end = textarea.selectionEnd || 0;
+			const newValue = message.slice(0, start) + variableText + message.slice(end);
+			setMessage(newValue);
+			// Set cursor position after inserted variable
+			setTimeout(() => {
+				textarea.focus();
+				textarea.setSelectionRange(start + variableText.length, start + variableText.length);
+			}, 0);
+		} else if (target === 'message' && isHtmlTemplate && isEditingHtml && mainIframeRef.current) {
+			// Insert variable into HTML editor
+			const iframeDoc = mainIframeRef.current.contentDocument || mainIframeRef.current.contentWindow?.document;
+			if (iframeDoc) {
+				iframeDoc.execCommand('insertText', false, variableText);
+			}
+		}
+		
+		setShowVariableMenu(false);
+	}
+
+	function openVariableMenu(target: 'subject' | 'message') {
+		setVariableMenuTarget(target);
+		setShowVariableMenu(true);
+	}
+
+	function exportJinjaTemplate() {
+		// Convert {{variable}} format to Jinja2 format
+		const jinjaMessage = message.replace(/\{\{(\w+)\}\}/g, '{{ $1 }}');
+		const jinjaSubject = subject.replace(/\{\{(\w+)\}\}/g, '{{ $1 }}');
+		
+		// Create the Jinja template content
+		const jinjaContent = `${jinjaMessage}`;
+
+		// Create a blob and download
+		const blob = new Blob([jinjaContent], { type: 'text/plain;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		
+		// Use template name or default name for the file
+		const currentTemplate = templates.find(t => t.id === selectedId);
+		const fileName = currentTemplate?.name 
+			? `${currentTemplate.name.toLowerCase().replace(/\s+/g, '-')}.jinja` 
+			: 'email-template.jinja';
+		
+		a.download = fileName;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
+	}
+
 	return (
-		<div className="max-w-6xl mx-auto p-6">
-			<div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+		<div className="min-h-screen bg-white">
+
+			<div className="max-w-6xl mx-auto p-6">
+				<div className="grid grid-cols-1 md:grid-cols-4 gap-6">
 				{/* sidebar */}
 				<aside className="md:col-span-1 bg-white border border-gray-100 rounded-lg p-4 shadow-sm">
 					<div className="flex items-center justify-between mb-4">
@@ -435,16 +511,44 @@ export default function TemplateEditor() {
 
 					<div className="grid grid-cols-1 gap-4">
 						<div>
-							<label className="block text-sm font-medium text-gray-700 mb-2">Email Subject</label>
+							<div className="flex items-center justify-between mb-2">
+								<label className="block text-sm font-medium text-gray-700">Email Subject</label>
+								<button
+									onClick={() => openVariableMenu('subject')}
+									className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100 border border-blue-200"
+									disabled={headers.length === 0}
+									title={headers.length === 0 ? 'Upload CSV first to use variables' : 'Insert variable'}
+								>
+									<Variable size={14} />
+									Insert Variable
+								</button>
+							</div>
 							<input
+								ref={subjectInputRef}
 								value={subject}
 								onChange={(e) => setSubject(e.target.value)}
 								className="w-full p-3 rounded-md border border-gray-200 bg-slate-50 focus:ring-2 focus:ring-primary/40"
 							/>
+							{headers.length === 0 && (
+								<p className="text-xs text-amber-600 mt-1">
+									💡 Upload a CSV file in the Table Editor to use variables
+								</p>
+							)}
 						</div>
 
 						<div>
-							<label className="block text-sm font-medium text-gray-700 mb-2">Email Message</label>
+							<div className="flex items-center justify-between mb-2">
+								<label className="block text-sm font-medium text-gray-700">Email Message</label>
+								<button
+									onClick={() => openVariableMenu('message')}
+									className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded-md hover:bg-blue-100 border border-blue-200"
+									disabled={headers.length === 0}
+									title={headers.length === 0 ? 'Upload CSV first to use variables' : 'Insert variable'}
+								>
+									<Variable size={14} />
+									Insert Variable
+								</button>
+							</div>
 							
 							{/* Formatting toolbar - only show when editing HTML */}
 							{isHtmlTemplate && isEditingHtml && (
@@ -542,6 +646,7 @@ export default function TemplateEditor() {
 								</div>
 							) : (
 								<textarea
+									ref={messageTextareaRef}
 									value={message}
 									onChange={(e) => setMessage(e.target.value)}
 									rows={12}
@@ -588,9 +693,15 @@ export default function TemplateEditor() {
 										{isEditingHtml ? 'Apply Changes' : 'Edit HTML'}
 									</button>
 								)}
-								<button className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer">Use this template</button>
+								<button 
+									onClick={exportJinjaTemplate}
+									className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer"
+								>
+									<FileDown size={18} />
+									Use this template
+								</button>
 							</div>
-							<div className="text-sm text-gray-500">Make sure to edit the HTML file first before using the template</div>
+							<div className="text-sm text-gray-500">Make sure your variables match!</div>
 						</div>
 					</div>
 				</section>
@@ -636,6 +747,56 @@ export default function TemplateEditor() {
 					</button>
 				</div>
 			)}
+
+			{/* Variable Menu Modal */}
+			{showVariableMenu && (
+				<>
+					<div 
+						className="fixed inset-0 bg-black/20 z-40"
+						onClick={() => setShowVariableMenu(false)}
+					/>
+					<div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-white border border-gray-200 rounded-lg shadow-xl p-4 z-50 w-80">
+						<div className="flex items-center justify-between mb-3">
+							<h3 className="text-lg font-semibold">Insert Variable</h3>
+							<button
+								onClick={() => setShowVariableMenu(false)}
+								className="text-gray-400 hover:text-gray-600"
+							>
+								✕
+							</button>
+						</div>
+						
+						{headers.length > 0 ? (
+							<>
+								<p className="text-sm text-gray-600 mb-3">
+									Select a column from your CSV to insert as a variable:
+								</p>
+								<div className="max-h-64 overflow-y-auto space-y-1">
+									{headers.map((header, index) => (
+										<button
+											key={index}
+											onClick={() => insertVariable(header, variableMenuTarget)}
+											className="w-full text-left px-3 py-2 rounded-md hover:bg-blue-50 border border-transparent hover:border-blue-200 transition-colors"
+										>
+											<div className="font-medium text-sm">{header}</div>
+											<div className="text-xs text-gray-500 font-mono">{'{{' + header + '}}'}</div>
+										</button>
+									))}
+								</div>
+								<div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+									💡 Variables will be replaced with actual values from your CSV when sending emails.
+								</div>
+							</>
+						) : (
+							<div className="text-center py-6">
+								<p className="text-sm text-gray-600 mb-2">No CSV data available</p>
+								<p className="text-xs text-gray-500">Upload a CSV file in the Table Editor first.</p>
+							</div>
+						)}
+					</div>
+				</>
+			)}
+			</div>
 		</div>
 	);
 }
