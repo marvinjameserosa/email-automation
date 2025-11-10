@@ -3,7 +3,15 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTableData } from "@/contexts/TableDataContext";
 import { BACKEND_BASE_URL } from "@/lib/config";
-import { CheckCircle, Plus, Download, Save, Trash2, Send, X } from "lucide-react";
+import {
+  CheckCircle,
+  Plus,
+  Download,
+  Save,
+  Trash2,
+  Send,
+  X,
+} from "lucide-react";
 
 /*
   TableEditor usage notes:
@@ -67,7 +75,15 @@ type TemplateOption = {
 };
 
 export default function TableEditor() {
-  const { data, headers, fileInfo, setData, setHeaders, setFileInfo, clearTableData } = useTableData();
+  const {
+    data,
+    headers,
+    fileInfo,
+    setData,
+    setHeaders,
+    setFileInfo,
+    clearTableData,
+  } = useTableData();
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -94,12 +110,14 @@ export default function TableEditor() {
           return;
         }
         const data = await response.json();
-        const normalized: TemplateOption[] = (data.templates ?? []).map((t: any) => ({
-          id: t.id,
-          name: t.name,
-          subject: t.subject,
-          filename: t.filename,
-        }));
+        const normalized: TemplateOption[] = (data.templates ?? []).map(
+          (t: TemplateOption) => ({
+            id: t.id,
+            name: t.name,
+            subject: t.subject,
+            filename: t.filename,
+          })
+        );
         if (!isMounted) {
           return;
         }
@@ -121,35 +139,41 @@ export default function TableEditor() {
     };
   }, []);
 
-  const onFile = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = String(reader.result || "");
-      const rows = parseCSV(text);
-      if (rows.length === 0) {
-        setErrors(["CSV appears to be empty"]);
-        setData([]);
-        setHeaders([]);
+  const onFile = useCallback(
+    (file: File) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = String(reader.result || "");
+        const rows = parseCSV(text);
+        if (rows.length === 0) {
+          setErrors(["CSV appears to be empty"]);
+          setData([]);
+          setHeaders([]);
+          setFileInfo({ name: file.name, size: file.size });
+          return;
+        }
+        setHeaders(rows[0]);
+        setData(rows.slice(1));
         setFileInfo({ name: file.name, size: file.size });
-        return;
-      }
-      setHeaders(rows[0]);
-      setData(rows.slice(1));
-      setFileInfo({ name: file.name, size: file.size });
-      setErrors([]);
-    };
-    reader.onerror = () => {
-      setErrors(["Failed to read file"]);
-    };
-    reader.readAsText(file);
-  }, []);
+        setErrors([]);
+      };
+      reader.onerror = () => {
+        setErrors(["Failed to read file"]);
+      };
+      reader.readAsText(file);
+    },
+    [setData, setHeaders, setFileInfo]
+  );
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      onFile(e.dataTransfer.files[0]);
-    }
-  }, [onFile]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        onFile(e.dataTransfer.files[0]);
+      }
+    },
+    [onFile]
+  );
 
   const handleBrowse = () => {
     fileInputRef.current?.click();
@@ -191,20 +215,24 @@ export default function TableEditor() {
 
   const addColumn = () => {
     setHeaders((prev) => [...prev, `Column ${prev.length + 1}`]);
-    setData((prev) => prev.map((row) => {
-      const r = row.slice();
-      r.push("");
-      return r;
-    }));
+    setData((prev) =>
+      prev.map((row) => {
+        const r = row.slice();
+        r.push("");
+        return r;
+      })
+    );
   };
 
   const removeColumn = (ci: number) => {
     setHeaders((prev) => prev.filter((_, i) => i !== ci));
-    setData((prev) => prev.map((row) => {
-      const r = row.slice();
-      if (ci >= 0 && ci < r.length) r.splice(ci, 1);
-      return r;
-    }));
+    setData((prev) =>
+      prev.map((row) => {
+        const r = row.slice();
+        if (ci >= 0 && ci < r.length) r.splice(ci, 1);
+        return r;
+      })
+    );
   };
 
   const exportCSV = () => {
@@ -213,18 +241,21 @@ export default function TableEditor() {
       if (v == null) return "";
       const s = String(v);
       if (s.includes('"')) return '"' + s.replace(/"/g, '""') + '"';
-      if (s.includes(',') || s.includes('\n') || s.includes('\r')) return '"' + s + '"';
+      if (s.includes(",") || s.includes("\n") || s.includes("\r"))
+        return '"' + s + '"';
       return s;
     };
 
     const rows = [headers, ...data];
-    const csv = rows.map((r) => r.map((c) => quote(c ?? "")).join(',')).join('\r\n');
+    const csv = rows
+      .map((r) => r.map((c) => quote(c ?? "")).join(","))
+      .join("\r\n");
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    const baseName = (fileInfo?.name ?? 'data').replace(/\.csv$/i, '');
+    const baseName = (fileInfo?.name ?? "data").replace(/\.csv$/i, "");
     a.download = `${baseName}_edited.csv`;
     document.body.appendChild(a);
     a.click();
@@ -237,7 +268,10 @@ export default function TableEditor() {
     if (headers.length === 0) errs.push("No headers found");
     const colCount = headers.length;
     data.forEach((row, i) => {
-      if (row.length !== colCount) errs.push(`Row ${i + 1} has ${row.length} columns (expected ${colCount})`);
+      if (row.length !== colCount)
+        errs.push(
+          `Row ${i + 1} has ${row.length} columns (expected ${colCount})`
+        );
     });
     setErrors(errs);
     return errs.length === 0;
@@ -274,7 +308,9 @@ export default function TableEditor() {
       return;
     }
 
-    const normalizedHeaders = headers.map((h) => (h || "").trim().toLowerCase());
+    const normalizedHeaders = headers.map((h) =>
+      (h || "").trim().toLowerCase()
+    );
     if (!normalizedHeaders.includes("email")) {
       setSendError('Your dataset must include an "email" column.');
       return;
@@ -336,7 +372,12 @@ export default function TableEditor() {
         body: JSON.stringify(payload),
       });
 
-      let sendPayload: any = null;
+      let sendPayload: {
+        detail?: string;
+        error?: string;
+        message?: string;
+        row_count?: number;
+      } | null = null;
       try {
         sendPayload = await sendResponse.json();
       } catch {
@@ -360,8 +401,8 @@ export default function TableEditor() {
 
       setSendSuccess(message);
       setNotice(null);
-    } catch (error: any) {
-      setSendError(error?.message || "Failed to send emails.");
+    } catch (error: unknown) {
+      setSendError((error as Error)?.message || "Failed to send emails.");
     } finally {
       setIsSending(false);
     }
@@ -375,12 +416,20 @@ export default function TableEditor() {
   const headerTopOffset = bannerCount * bannerHeight;
 
   return (
-    <div className="min-h-screen bg-white text-slate-900" style={{ fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto" }}>
+    <div
+      className="min-h-screen bg-white text-slate-900"
+      style={{
+        fontFamily:
+          "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto",
+      }}
+    >
       {/* Page header */}
       <header className="border-b py-4 px-6">
         <div className="max-w-7xl mx-auto">
           <h1 className="text-2xl font-semibold text-gray-900">Table Editor</h1>
-          <p className="text-sm text-slate-500 mt-1">Upload, preview, and edit your recipient data before sending.</p>
+          <p className="text-sm text-slate-500 mt-1">
+            Upload, preview, and edit your recipient data before sending.
+          </p>
         </div>
       </header>
 
@@ -395,19 +444,66 @@ export default function TableEditor() {
               className="rounded-lg border border-slate-200 p-8 text-center shadow-sm"
             >
               <div className="flex flex-col items-center justify-center">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" className="mb-3">
-                  <path d="M12 3v9" stroke={accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke={accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M7 10l5-5 5 5" stroke={accent} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <svg
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="mb-3"
+                >
+                  <path
+                    d="M12 3v9"
+                    stroke={accent}
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
+                    stroke={accent}
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M7 10l5-5 5 5"
+                    stroke={accent}
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
                 </svg>
-                <div className="text-lg font-medium">Drag and drop your CSV file here or <button onClick={handleBrowse} style={{ color: accent }} className="underline">click to browse</button>.</div>
-                <div className="text-sm text-slate-500 mt-2">CSV only · First row will be used as column names</div>
-                <input ref={fileInputRef} onChange={handleFileInput} type="file" accept=".csv,text/csv" className="hidden" />
+                <div className="text-lg font-medium">
+                  Drag and drop your CSV file here or{" "}
+                  <button
+                    onClick={handleBrowse}
+                    style={{ color: accent }}
+                    className="underline"
+                  >
+                    click to browse
+                  </button>
+                  .
+                </div>
+                <div className="text-sm text-slate-500 mt-2">
+                  CSV only · First row will be used as column names
+                </div>
+                <input
+                  ref={fileInputRef}
+                  onChange={handleFileInput}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                />
 
                 {fileInfo ? (
                   <div className="mt-4 text-sm text-slate-700">
-                    <div><strong>{fileInfo.name}</strong> • {(fileInfo.size / 1024).toFixed(1)} KB</div>
-                    <div className="text-green-600 text-xs mt-1">Upload successful</div>
+                    <div>
+                      <strong>{fileInfo.name}</strong> •{" "}
+                      {(fileInfo.size / 1024).toFixed(1)} KB
+                    </div>
+                    <div className="text-green-600 text-xs mt-1">
+                      Upload successful
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -416,27 +512,48 @@ export default function TableEditor() {
             {/* Toolbar */}
             <div className="flex items-center justify-between mt-6">
               <div className="flex items-center space-x-3">
-                  <button onClick={validateData} style={{ border: `1px solid ${accent}` }} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium">
-                    <CheckCircle size={16} />
-                    Validate Data
-                  </button>
-                  <button onClick={addColumn} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border">
-                    <Plus size={16} />
-                    Add Column
-                  </button>
-                  <button onClick={exportCSV} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border">
-                    <Download size={16} />
-                    Export CSV
-                  </button>
-                  <button onClick={saveChanges} style={{ background: accent }} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-white">
-                    <Save size={16} />
-                    Save Changes
-                  </button>
-                  <button onClick={() => { clearTableData(); setErrors([]); setNotice(null); }} className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-red-500 text-red-600 hover:bg-red-50">
-                    <Trash2 size={16} />
-                    Clear All
-                  </button>
-                </div>
+                <button
+                  onClick={validateData}
+                  style={{ border: `1px solid ${accent}` }}
+                  className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium"
+                >
+                  <CheckCircle size={16} />
+                  Validate Data
+                </button>
+                <button
+                  onClick={addColumn}
+                  className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border"
+                >
+                  <Plus size={16} />
+                  Add Column
+                </button>
+                <button
+                  onClick={exportCSV}
+                  className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border"
+                >
+                  <Download size={16} />
+                  Export CSV
+                </button>
+                <button
+                  onClick={saveChanges}
+                  style={{ background: accent }}
+                  className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium text-white"
+                >
+                  <Save size={16} />
+                  Save Changes
+                </button>
+                <button
+                  onClick={() => {
+                    clearTableData();
+                    setErrors([]);
+                    setNotice(null);
+                  }}
+                  className="flex items-center gap-2 px-3 py-2 rounded-md text-sm border border-red-500 text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={16} />
+                  Clear All
+                </button>
+              </div>
               <div>
                 <button
                   onClick={handleSend}
@@ -467,52 +584,86 @@ export default function TableEditor() {
                         so the message stays visible at the top of the table area. */}
                     {errors.length > 0 && (
                       <tr>
-                        <th colSpan={Math.max(headers.length, 1)}
-                            className="text-left px-4 py-2 border-b"
-                            style={{ position: 'sticky', top: 0, background: '#fff5f5', zIndex: 12 }}>
-                          <div className="text-sm text-red-800">{errors.map((e, i) => (<div key={i}>{e}</div>))}</div>
+                        <th
+                          colSpan={Math.max(headers.length, 1)}
+                          className="text-left px-4 py-2 border-b"
+                          style={{
+                            position: "sticky",
+                            top: 0,
+                            background: "#fff5f5",
+                            zIndex: 12,
+                          }}
+                        >
+                          <div className="text-sm text-red-800">
+                            {errors.map((e, i) => (
+                              <div key={i}>{e}</div>
+                            ))}
+                          </div>
                         </th>
                       </tr>
                     )}
                     <tr>
-                      {headers.length > 0 ? headers.map((h, ci) => (
-                        <th key={ci} className="text-left px-4 py-3 border-b min-w-40" style={{ position: 'sticky', top: headerTopOffset, background: 'white', zIndex: 10 }}>
-                          <div className="flex items-center space-x-2">
+                      {headers.length > 0 ? (
+                        headers.map((h, ci) => (
+                          <th
+                            key={ci}
+                            className="text-left px-4 py-3 border-b min-w-40"
+                            style={{
+                              position: "sticky",
+                              top: headerTopOffset,
+                              background: "white",
+                              zIndex: 10,
+                            }}
+                          >
+                            <div className="flex items-center space-x-2">
                               <input
                                 value={h}
-                                onChange={(e) => setHeaders((prev) => {
-                                  const next = prev.slice();
-                                  next[ci] = e.target.value;
-                                  return next;
-                                })}
+                                onChange={(e) =>
+                                  setHeaders((prev) => {
+                                    const next = prev.slice();
+                                    next[ci] = e.target.value;
+                                    return next;
+                                  })
+                                }
                                 className="w-full bg-transparent outline-none text-sm font-semibold"
                                 title={h}
                               />
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                removeColumn(ci);
-                              }}
-                              title="Remove column"
-                              className="text-red-500 text-sm px-1 hover:bg-red-50 rounded"
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeColumn(ci);
+                                }}
+                                title="Remove column"
+                                className="text-red-500 text-sm px-1 hover:bg-red-50 rounded"
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          </th>
+                        ))
+                      ) : (
+                        <th className="px-4 py-3 text-slate-400">
+                          No data loaded
                         </th>
-                      )) : (
-                        <th className="px-4 py-3 text-slate-400">No data loaded</th>
                       )}
                     </tr>
                   </thead>
                   <tbody>
                     {data.map((row, ri) => (
-                      <tr key={ri} className={ri % 2 === 0 ? "bg-white" : "bg-slate-50"}>
+                      <tr
+                        key={ri}
+                        className={ri % 2 === 0 ? "bg-white" : "bg-slate-50"}
+                      >
                         {headers.map((_, ci) => (
-                          <td key={ci} className="px-3 py-2 align-top border-b min-w-40">
+                          <td
+                            key={ci}
+                            className="px-3 py-2 align-top border-b min-w-40"
+                          >
                             <input
                               value={row[ci] ?? ""}
-                              onChange={(e) => updateCell(ri, ci, e.target.value)}
+                              onChange={(e) =>
+                                updateCell(ri, ci, e.target.value)
+                              }
                               className="w-full bg-transparent outline-none text-sm"
                             />
                           </td>
@@ -524,9 +675,14 @@ export default function TableEditor() {
               </div>
 
               <div className="p-4 border-t bg-white flex items-center justify-between">
-                <div className="text-sm text-slate-600">Rows: {data.length} · Columns: {headers.length}</div>
+                <div className="text-sm text-slate-600">
+                  Rows: {data.length} · Columns: {headers.length}
+                </div>
                 <div>
-                  <button onClick={addRow} className="flex items-center gap-1 px-3 py-1 text-sm rounded border hover:bg-gray-50">
+                  <button
+                    onClick={addRow}
+                    className="flex items-center gap-1 px-3 py-1 text-sm rounded border hover:bg-gray-50"
+                  >
                     <Plus size={14} />
                     Add row
                   </button>
@@ -541,12 +697,27 @@ export default function TableEditor() {
               <div className="rounded-lg border p-4 shadow-sm bg-white">
                 <h4 className="text-sm font-semibold">CSV Info</h4>
                 <div className="mt-3 text-sm text-slate-600">
-                  <div>Rows: <strong>{data.length}</strong></div>
-                  <div>Columns: <strong>{headers.length}</strong></div>
-                  <div className="mt-2">Errors: <strong className="text-red-600">{errors.length}</strong></div>
+                  <div>
+                    Rows: <strong>{data.length}</strong>
+                  </div>
+                  <div>
+                    Columns: <strong>{headers.length}</strong>
+                  </div>
+                  <div className="mt-2">
+                    Errors:{" "}
+                    <strong className="text-red-600">{errors.length}</strong>
+                  </div>
                 </div>
                 <div className="mt-4">
-                  <button onClick={() => { clearTableData(); setErrors([]); }} className="w-full px-3 py-2 rounded-md border text-sm">Re-upload CSV</button>
+                  <button
+                    onClick={() => {
+                      clearTableData();
+                      setErrors([]);
+                    }}
+                    className="w-full px-3 py-2 rounded-md border text-sm"
+                  >
+                    Re-upload CSV
+                  </button>
                 </div>
               </div>
 
@@ -559,11 +730,15 @@ export default function TableEditor() {
                   </label>
                   <select
                     value={selectedTemplateId}
-                    onChange={(event) => handleTemplateChange(event.target.value)}
+                    onChange={(event) =>
+                      handleTemplateChange(event.target.value)
+                    }
                     className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm focus:border-slate-400 focus:outline-none"
                   >
                     <option value="" disabled>
-                      {templates.length === 0 ? "Loading templates..." : "Select a template"}
+                      {templates.length === 0
+                        ? "Loading templates..."
+                        : "Select a template"}
                     </option>
                     {templates.map((template) => (
                       <option key={template.id} value={template.id}>
@@ -594,7 +769,9 @@ export default function TableEditor() {
                   <button
                     type="button"
                     onClick={() => {
-                      const selected = templates.find((t) => t.id === selectedTemplateId);
+                      const selected = templates.find(
+                        (t) => t.id === selectedTemplateId
+                      );
                       setEmailSubject(selected?.subject || "");
                       setSubjectManuallyEdited(false);
                       setSendError(null);
@@ -634,13 +811,17 @@ export default function TableEditor() {
                     }}
                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
                   />
-                  <label htmlFor="with-attachments" className="text-sm text-slate-600">
+                  <label
+                    htmlFor="with-attachments"
+                    className="text-sm text-slate-600"
+                  >
                     Attach matching PDFs (if available)
                   </label>
                 </div>
 
                 <p className="mt-3 text-xs text-slate-500">
-                  Required columns: <code>recipient</code> and <code>email</code>.
+                  Required columns: <code>recipient</code> and{" "}
+                  <code>email</code>.
                 </p>
 
                 {sendError ? (
