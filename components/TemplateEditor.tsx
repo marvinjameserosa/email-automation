@@ -21,15 +21,11 @@ type ContextMenu = {
 export default function TemplateEditor() {
 	const [subject, setSubject] = useState('Subject');
 	const [message, setMessage] = useState('Pick a template / Make a message');
-	const [previewOpen, setPreviewOpen] = useState(false);
 	const [templates, setTemplates] = useState<Template[]>([]);
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [contextMenu, setContextMenu] = useState<ContextMenu>(null);
-	const [isEditingInPreview, setIsEditingInPreview] = useState(false);
-	const [previewSubject, setPreviewSubject] = useState('');
-	const [previewMessage, setPreviewMessage] = useState('');
-	const editableRef = useRef<HTMLDivElement>(null);
-	const iframeRef = useRef<HTMLIFrameElement>(null);
+	const [isEditingHtml, setIsEditingHtml] = useState(false);
+	const mainIframeRef = useRef<HTMLIFrameElement>(null);
 	const [isSaving, setIsSaving] = useState(false);
 	const [lastSaved, setLastSaved] = useState<Date | null>(null);
 	const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -176,10 +172,8 @@ export default function TemplateEditor() {
 		});
 	}
 
-	const currentMessage = isEditingInPreview ? previewMessage : message;
-	
 	// Check if message contains full HTML document (not just HTML tags)
-	const isHtmlTemplate = currentMessage.trim().startsWith('<!DOCTYPE') || currentMessage.trim().startsWith('<html');
+	const isHtmlTemplate = message.trim().startsWith('<!DOCTYPE') || message.trim().startsWith('<html');
 
 	// Check if there are unsaved changes
 	const hasUnsavedChanges = originalContent && 
@@ -353,55 +347,6 @@ export default function TemplateEditor() {
 		});
 	}
 
-	function duplicateTemplate(id: string) {
-		const templateToDuplicate = templates.find(t => t.id === id);
-		if (!templateToDuplicate) return;
-		
-		const newName = prompt('Enter name for duplicate:', `${templateToDuplicate.name} (Copy)`);
-		if (!newName) return;
-		
-		// Create new template with same content
-		fetch('/api/templates', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ 
-				name: newName, 
-				subject: templateToDuplicate.subject, 
-				message: templateToDuplicate.message 
-			})
-		})
-		.then(res => res.json())
-		.then(data => {
-			if (data.success) {
-				return fetch('/api/templates');
-			} else {
-				throw new Error(data.error || 'Failed to duplicate');
-			}
-		})
-		.then(res => res.json())
-		.then(data => {
-			const newTemplates: Template[] = data.templates.map((t: any) => ({
-				id: t.id,
-				name: t.name,
-				subject: t.subject,
-				message: t.message,
-				createdAt: Date.now(),
-				filename: t.filename
-			}));
-			setTemplates(newTemplates);
-			
-			// Select the duplicated template
-			const duplicatedTemplate = newTemplates.find(t => t.name === newName);
-			if (duplicatedTemplate) {
-				setSelectedId(duplicatedTemplate.id);
-			}
-		})
-		.catch(error => {
-			console.error('Error duplicating template:', error);
-			alert('Failed to duplicate template: ' + error.message);
-		});
-	}
-
 	function handleContextMenu(e: React.MouseEvent, templateId: string) {
 		e.preventDefault();
 		setContextMenu({
@@ -412,55 +357,13 @@ export default function TemplateEditor() {
 	}
 
 	function applyFormatting(command: string, value?: string) {
-		if (isHtmlTemplate && iframeRef.current) {
-			// Apply formatting to iframe content
-			const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
+		if (isHtmlTemplate && isEditingHtml && mainIframeRef.current) {
+			// Apply formatting to main iframe content when editing HTML
+			const iframeDoc = mainIframeRef.current.contentDocument || mainIframeRef.current.contentWindow?.document;
 			if (iframeDoc) {
 				iframeDoc.execCommand(command, false, value);
 			}
-		} else {
-			// Apply formatting to content editable div
-			document.execCommand(command, false, value);
-			editableRef.current?.focus();
 		}
-	}
-
-	function handleEditInPreview() {
-		if (isEditingInPreview) {
-			// Save changes back to main editor
-			if (isHtmlTemplate && iframeRef.current) {
-				// For HTML templates, get content from iframe
-				const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
-				if (iframeDoc) {
-					const htmlContent = iframeDoc.documentElement.outerHTML;
-					setMessage(htmlContent);
-				}
-			} else {
-				// For simple templates, get content from content editable div
-				const htmlContent = editableRef.current?.innerHTML || '';
-				setMessage(htmlContent);
-			}
-			setSubject(previewSubject);
-		} else {
-			// Enter edit mode - copy current values
-			setPreviewSubject(subject);
-			setPreviewMessage(message);
-			
-			// If HTML template, make iframe editable after it loads
-			if (isHtmlTemplate) {
-				setTimeout(() => {
-					if (iframeRef.current) {
-						const iframeDoc = iframeRef.current.contentDocument || iframeRef.current.contentWindow?.document;
-						if (iframeDoc && iframeDoc.body) {
-							iframeDoc.designMode = 'on';
-							// Add some styling to indicate it's editable
-							iframeDoc.body.style.cursor = 'text';
-						}
-					}
-				}, 100);
-			}
-		}
-		setIsEditingInPreview(!isEditingInPreview);
 	}
 
 	return (
@@ -542,186 +445,154 @@ export default function TemplateEditor() {
 
 						<div>
 							<label className="block text-sm font-medium text-gray-700 mb-2">Email Message</label>
-							<textarea
-								value={message}
-								onChange={(e) => setMessage(e.target.value)}
-								rows={12}
-								className="w-full p-3 rounded-md border border-gray-200 font-mono whitespace-pre-wrap resize-y bg-white/95 focus:ring-2 focus:ring-primary/40"
-							/>
+							
+							{/* Formatting toolbar - only show when editing HTML */}
+							{isHtmlTemplate && isEditingHtml && (
+								<div className="mb-3 p-2 bg-gray-50 border border-gray-200 rounded-md flex items-center gap-2 flex-wrap">
+									<button
+										onClick={() => applyFormatting('bold')}
+										className="p-2 hover:bg-gray-200 rounded"
+										title="Bold"
+										type="button"
+									>
+										<Bold size={18} />
+									</button>
+									<button
+										onClick={() => applyFormatting('italic')}
+										className="p-2 hover:bg-gray-200 rounded"
+										title="Italic"
+										type="button"
+									>
+										<Italic size={18} />
+									</button>
+									<button
+										onClick={() => applyFormatting('underline')}
+										className="p-2 hover:bg-gray-200 rounded"
+										title="Underline"
+										type="button"
+									>
+										<Underline size={18} />
+									</button>
+									<div className="w-px h-6 bg-gray-300"></div>
+									<button
+										onClick={() => applyFormatting('insertUnorderedList')}
+										className="p-2 hover:bg-gray-200 rounded"
+										title="Bullet List"
+										type="button"
+									>
+										<List size={18} />
+									</button>
+									<button
+										onClick={() => applyFormatting('insertOrderedList')}
+										className="p-2 hover:bg-gray-200 rounded"
+										title="Numbered List"
+										type="button"
+									>
+										<ListOrdered size={18} />
+									</button>
+									<div className="w-px h-6 bg-gray-300"></div>
+									<button
+										onClick={() => {
+											const url = prompt('Enter link URL:');
+											if (url) applyFormatting('createLink', url);
+										}}
+										className="p-2 hover:bg-gray-200 rounded"
+										title="Insert Link"
+										type="button"
+									>
+										<Link size={18} />
+									</button>
+									<div className="w-px h-6 bg-gray-300"></div>
+									<select
+										onChange={(e) => applyFormatting('formatBlock', e.target.value)}
+										className="p-1 text-sm border border-gray-300 rounded"
+										defaultValue=""
+									>
+										<option value="">Normal</option>
+										<option value="h1">Heading 1</option>
+										<option value="h2">Heading 2</option>
+										<option value="h3">Heading 3</option>
+										<option value="p">Paragraph</option>
+									</select>
+									<select
+										onChange={(e) => {
+											applyFormatting('fontSize', e.target.value);
+										}}
+										className="p-1 text-sm border border-gray-300 rounded"
+										defaultValue="3"
+									>
+										<option value="1">Tiny</option>
+										<option value="2">Small</option>
+										<option value="3">Normal</option>
+										<option value="4">Large</option>
+										<option value="5">Huge</option>
+									</select>
+								</div>
+							)}
+							
+							{isHtmlTemplate ? (
+								<div className="border border-gray-200 rounded-md overflow-hidden bg-white">
+									<iframe
+										ref={mainIframeRef}
+										srcDoc={message}
+										className="w-full h-[600px] border-0"
+										title="Email Template"
+										sandbox="allow-same-origin"
+									/>
+								</div>
+							) : (
+								<textarea
+									value={message}
+									onChange={(e) => setMessage(e.target.value)}
+									rows={12}
+									className="w-full p-3 rounded-md border border-gray-200 font-mono whitespace-pre-wrap resize-y bg-white/95 focus:ring-2 focus:ring-primary/40"
+								/>
+							)}
 						</div>
 
 						<div className="flex items-center justify-between gap-3">
 							<div className="flex items-center gap-3">
-								<button onClick={() => setPreviewOpen(true)} className="inline-flex items-center gap-2 bg-white border border-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 cursor-pointer">Preview email</button>
+								{isHtmlTemplate && (
+									<button 
+										onClick={() => {
+											if (isEditingHtml) {
+												// Save changes from iframe
+												if (mainIframeRef.current) {
+													const iframeDoc = mainIframeRef.current.contentDocument || mainIframeRef.current.contentWindow?.document;
+													if (iframeDoc) {
+														const htmlContent = iframeDoc.documentElement.outerHTML;
+														setMessage(htmlContent);
+													}
+												}
+												setIsEditingHtml(false);
+											} else {
+												// Enter edit mode
+												setIsEditingHtml(true);
+												setTimeout(() => {
+													if (mainIframeRef.current) {
+														const iframeDoc = mainIframeRef.current.contentDocument || mainIframeRef.current.contentWindow?.document;
+														if (iframeDoc && iframeDoc.body) {
+															iframeDoc.designMode = 'on';
+															iframeDoc.body.style.cursor = 'text';
+														}
+													}
+												}, 100);
+											}
+										}}
+										className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg cursor-pointer ${
+											isEditingHtml 
+												? 'bg-green-600 hover:bg-green-700 text-white' 
+												: 'bg-blue-600 hover:bg-blue-700 text-white'
+										}`}
+									>
+										{isEditingHtml ? 'Apply Changes' : 'Edit HTML'}
+									</button>
+								)}
 								<button className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg cursor-pointer">Use this template</button>
 							</div>
-							<div className="text-sm text-gray-500">Use <code className="bg-gray-100 px-1 rounded">{'{name}'}</code> as placeholder for recipient name.</div>
+							<div className="text-sm text-gray-500">Make sure to edit the HTML file first before using the template</div>
 						</div>
 					</div>
-
-					{previewOpen && (
-						<div role="dialog" aria-modal="true" className="fixed inset-0 flex items-center justify-center bg-black/40 z-50" onClick={() => setPreviewOpen(false)}>
-							<div onClick={(e) => e.stopPropagation()} className="w-[min(900px,96%)] max-h-[90vh] overflow-auto bg-white rounded-lg p-5 shadow-lg">
-								<div className="flex justify-between items-center mb-3">
-									<div>
-										<strong className="text-lg">Email preview</strong>
-										<div className="text-sm text-gray-500">
-											{isEditingInPreview ? 'Edit your email visually' : 'How this email will look for the recipient'}
-										</div>
-									</div>
-									<div className="flex items-center gap-2">
-										<button 
-											onClick={handleEditInPreview} 
-											className={`px-3 py-2 text-sm rounded-md ${isEditingInPreview ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}`}
-										>
-											{isEditingInPreview ? 'Apply Changes' : 'Edit'}
-										</button>
-										<button onClick={() => {
-											setPreviewOpen(false);
-											setIsEditingInPreview(false);
-										}} className="text-sm text-gray-700 bg-transparent border-0 cursor-pointer">Close</button>
-									</div>
-								</div>
-
-								<div className="mb-3">
-									<div className="text-sm text-gray-500 mb-2">Subject</div>
-									{isEditingInPreview ? (
-										<input
-											value={previewSubject}
-											onChange={(e) => setPreviewSubject(e.target.value)}
-											className="w-full p-3 rounded-md border border-gray-200 bg-slate-50 focus:ring-2 focus:ring-primary/40"
-										/>
-									) : (
-										<div className="p-3 rounded-md bg-gray-100 border border-gray-200">{subject}</div>
-									)}
-								</div>
-
-								{/* Formatting toolbar - only show in edit mode */}
-								{isEditingInPreview && (
-									<div className="mb-3 p-2 bg-gray-50 border border-gray-200 rounded-md flex items-center gap-2 flex-wrap">
-										<button
-											onClick={() => applyFormatting('bold')}
-											className="p-2 hover:bg-gray-200 rounded"
-											title="Bold"
-											type="button"
-										>
-											<Bold size={18} />
-										</button>
-										<button
-											onClick={() => applyFormatting('italic')}
-											className="p-2 hover:bg-gray-200 rounded"
-											title="Italic"
-											type="button"
-										>
-											<Italic size={18} />
-										</button>
-										<button
-											onClick={() => applyFormatting('underline')}
-											className="p-2 hover:bg-gray-200 rounded"
-											title="Underline"
-											type="button"
-										>
-											<Underline size={18} />
-										</button>
-										<div className="w-px h-6 bg-gray-300"></div>
-										<button
-											onClick={() => applyFormatting('insertUnorderedList')}
-											className="p-2 hover:bg-gray-200 rounded"
-											title="Bullet List"
-											type="button"
-										>
-											<List size={18} />
-										</button>
-										<button
-											onClick={() => applyFormatting('insertOrderedList')}
-											className="p-2 hover:bg-gray-200 rounded"
-											title="Numbered List"
-											type="button"
-										>
-											<ListOrdered size={18} />
-										</button>
-										<div className="w-px h-6 bg-gray-300"></div>
-										<button
-											onClick={() => {
-												const url = prompt('Enter link URL:');
-												if (url) applyFormatting('createLink', url);
-											}}
-											className="p-2 hover:bg-gray-200 rounded"
-											title="Insert Link"
-											type="button"
-										>
-											<Link size={18} />
-										</button>
-										<div className="w-px h-6 bg-gray-300"></div>
-										<select
-											onChange={(e) => applyFormatting('formatBlock', e.target.value)}
-											className="p-1 text-sm border border-gray-300 rounded"
-											defaultValue=""
-										>
-											<option value="">Normal</option>
-											<option value="h1">Heading 1</option>
-											<option value="h2">Heading 2</option>
-											<option value="h3">Heading 3</option>
-											<option value="p">Paragraph</option>
-										</select>
-										<select
-											onChange={(e) => {
-												applyFormatting('fontSize', e.target.value);
-											}}
-											className="p-1 text-sm border border-gray-300 rounded"
-											defaultValue="3"
-										>
-											<option value="1">Tiny</option>
-											<option value="2">Small</option>
-											<option value="3">Normal</option>
-											<option value="4">Large</option>
-											<option value="5">Huge</option>
-										</select>
-									</div>
-								)}
-
-								<div>
-									<div className="text-sm text-gray-500 mb-2">Message</div>
-									{isEditingInPreview ? (
-										isHtmlTemplate ? (
-											<div className="border border-gray-200 rounded-md overflow-hidden">
-												<iframe
-													ref={iframeRef}
-													srcDoc={previewMessage}
-													className="w-full h-[600px] border-0"
-													title="Email Editor"
-													sandbox="allow-same-origin allow-scripts"
-												/>
-											</div>
-										) : (
-											<div
-												ref={editableRef}
-												contentEditable
-												suppressContentEditableWarning
-												dangerouslySetInnerHTML={{ __html: previewMessage }}
-												className="w-full min-h-[400px] p-3 rounded-md border border-gray-200 bg-white focus:ring-2 focus:ring-primary/40 focus:outline-none overflow-auto"
-												style={{ whiteSpace: 'normal' }}
-											/>
-										)
-									) : isHtmlTemplate ? (
-										<div className="border border-gray-200 rounded-md overflow-hidden">
-											<iframe
-												srcDoc={currentMessage}
-												className="w-full h-[600px] border-0"
-												title="Email Preview"
-												sandbox="allow-same-origin"
-											/>
-										</div>
-									) : (
-										<div 
-											className="p-3 rounded-md border border-gray-200 overflow-auto"
-											dangerouslySetInnerHTML={{ __html: currentMessage }}
-										/>
-									)}
-								</div>
-							</div>
-						</div>
-					)}
 				</section>
 			</div>
 
@@ -741,16 +612,6 @@ export default function TemplateEditor() {
 					>
 						<FolderOpen size={14} />
 						Open
-					</button>
-					<button
-						onClick={() => {
-							duplicateTemplate(contextMenu.templateId);
-							setContextMenu(null);
-						}}
-						className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
-					>
-						<Copy size={14} />
-						Duplicate
 					</button>
 					<button
 						onClick={() => {
