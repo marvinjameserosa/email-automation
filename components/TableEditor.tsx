@@ -84,6 +84,17 @@ export default function TableEditor() {
   const accent = "#00FF88";
 
   useEffect(() => {
+    // Debug: surface backend base URL once in the browser console to help diagnose 405/redirect issues in prod
+    try {
+      // Only log client-side to avoid noisy server logs during SSR
+      if (typeof window !== "undefined") {
+        console.log("[automail] Using BACKEND_BASE_URL:", BACKEND_BASE_URL);
+        if (!process.env.NEXT_PUBLIC_BACKEND_URL) {
+            console.warn("[automail] NEXT_PUBLIC_BACKEND_URL not set; defaulting to localhost fallback (set this in your deployment env to avoid cross-origin/method issues).");
+        }
+      }
+    } catch {}
+
     let isMounted = true;
 
     async function loadTemplates() {
@@ -94,12 +105,15 @@ export default function TableEditor() {
           return;
         }
         const data = await response.json();
-        const normalized: TemplateOption[] = (data.templates ?? []).map((t: any) => ({
-          id: t.id,
-          name: t.name,
-          subject: t.subject,
-          filename: t.filename,
-        }));
+        const normalized: TemplateOption[] = (data.templates ?? []).map((t: unknown) => {
+          const obj = (t ?? {}) as Record<string, unknown>;
+          return {
+            id: String(obj.id ?? ""),
+            name: String(obj.name ?? ""),
+            subject: String(obj.subject ?? ""),
+            filename: typeof obj.filename === "string" ? obj.filename : undefined,
+          };
+        });
         if (!isMounted) {
           return;
         }
@@ -142,7 +156,7 @@ export default function TableEditor() {
       setErrors(["Failed to read file"]);
     };
     reader.readAsText(file);
-  }, []);
+  }, [setData, setFileInfo, setHeaders]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -336,7 +350,7 @@ export default function TableEditor() {
         body: JSON.stringify(payload),
       });
 
-      let sendPayload: any = null;
+      let sendPayload: unknown = null;
       try {
         sendPayload = await sendResponse.json();
       } catch {
@@ -344,24 +358,34 @@ export default function TableEditor() {
       }
 
       if (!sendResponse.ok) {
-        const message =
-          sendPayload?.detail ||
-          sendPayload?.error ||
-          sendPayload?.message ||
-          sendResponse.statusText;
+        let message: string | undefined;
+        if (sendPayload && typeof sendPayload === "object") {
+          const obj = sendPayload as Record<string, unknown>;
+          message =
+            (typeof obj.detail === "string" ? obj.detail : undefined) ||
+            (typeof obj.error === "string" ? obj.error : undefined) ||
+            (typeof obj.message === "string" ? obj.message : undefined);
+        }
+        message = message || sendResponse.statusText;
         throw new Error(message || "Failed to start bulk email job.");
       }
 
-      const message =
-        sendPayload?.message ||
-        `Bulk email job started for ${
-          sendPayload?.row_count ?? rows.length
-        } recipient${rows.length === 1 ? "" : "s"}.`;
+      let message: string | undefined;
+      let rowCount: number | undefined;
+      if (sendPayload && typeof sendPayload === "object") {
+        const obj = sendPayload as Record<string, unknown>;
+        if (typeof obj.message === "string") message = obj.message;
+        if (typeof obj.row_count === "number") rowCount = obj.row_count;
+      }
+      message =
+        message ||
+        `Bulk email job started for ${rowCount ?? rows.length} recipient${rows.length === 1 ? "" : "s"}.`;
 
       setSendSuccess(message);
       setNotice(null);
-    } catch (error: any) {
-      setSendError(error?.message || "Failed to send emails.");
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to send emails.";
+      setSendError(msg);
     } finally {
       setIsSending(false);
     }
