@@ -55,16 +55,16 @@ export async function POST(request: NextRequest) {
 		if (!message.trim().startsWith('<!DOCTYPE') && !message.trim().startsWith('<html')) {
 			// Wrap plain text in basic HTML structure
 			htmlContent = `<!DOCTYPE html>
-                            <html>
-                                <head>
-                                    <meta charset="UTF-8">
-                                    <title>${subject}</title>
-                                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                                </head>
-                                <body>
-                                    <pre style="font-family: sans-serif; white-space: pre-wrap;">${message}</pre>
-                                </body>
-                            </html>`;
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <title>${subject}</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
+    <body>
+        <pre style="font-family: sans-serif; white-space: pre-wrap;">${message}</pre>
+    </body>
+</html>`;
 		}
 		
 		await writeFile(filePath, htmlContent, 'utf-8');
