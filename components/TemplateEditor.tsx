@@ -241,62 +241,6 @@ export default function TemplateEditor() {
 		});
 	}
 
-	function overwriteSelected() {
-		if (!selectedId) return saveAsNew();
-		
-		const currentTemplate = templates.find(t => t.id === selectedId);
-		
-		if (!currentTemplate?.filename) {
-			return saveAsNew();
-		}
-		
-		setIsSaving(true);
-		
-		// Delete old file and create new one with same name
-		fetch(`/api/templates?filename=${currentTemplate.filename}`, {
-			method: 'DELETE'
-		})
-		.then(() => {
-			return fetch('/api/templates', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ 
-					name: currentTemplate.name, 
-					subject, 
-					message 
-				})
-			});
-		})
-		.then(res => res.json())
-		.then(data => {
-			if (data.success) {
-				console.log('Template updated');
-				return fetch('/api/templates');
-			} else {
-				throw new Error(data.error || 'Failed to update');
-			}
-		})
-		.then(res => res.json())
-		.then(data => {
-			const newTemplates: Template[] = data.templates.map((t: any) => ({
-				id: t.id,
-				name: t.name,
-				subject: t.subject,
-				message: t.message,
-				createdAt: Date.now(),
-				filename: t.filename
-			}));
-			setTemplates(newTemplates);
-		})
-		.catch(error => {
-			console.error('Error updating template:', error);
-			alert('Failed to update template: ' + error.message);
-		})
-		.finally(() => {
-			setIsSaving(false);
-		});
-	}
-
 	function loadTemplate(id: string) {
 		const t = templates.find((x) => x.id === id);
 		if (!t) return;
