@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTableData } from "@/contexts/TableDataContext";
+import { BACKEND_BASE_URL } from "@/lib/config";
 import { CheckCircle, Plus, Download, Save, Trash2, Send, X } from "lucide-react";
 
 /*
@@ -43,13 +44,82 @@ function parseCSV(text: string): string[][] {
   return rows;
 }
 
+async function parseErrorResponse(response: Response): Promise<string> {
+  try {
+    const data = await response.json();
+    if (typeof data === "string") return data;
+    return data?.detail || data?.error || data?.message || response.statusText;
+  } catch {
+    try {
+      const text = await response.text();
+      return text || response.statusText;
+    } catch {
+      return response.statusText;
+    }
+  }
+}
+
+type TemplateOption = {
+  id: string;
+  name: string;
+  subject: string;
+  filename?: string;
+};
+
 export default function TableEditor() {
   const { data, headers, fileInfo, setData, setHeaders, setFileInfo, clearTableData } = useTableData();
   const [errors, setErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [templates, setTemplates] = useState<TemplateOption[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [subjectManuallyEdited, setSubjectManuallyEdited] = useState(false);
+  const [withAttachments, setWithAttachments] = useState(true);
+  const [ccInput, setCcInput] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [sendSuccess, setSendSuccess] = useState<string | null>(null);
 
   const accent = "#00FF88";
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadTemplates() {
+      try {
+        const response = await fetch("/api/templates");
+        if (!response.ok) {
+          console.error("Failed to load templates:", response.statusText);
+          return;
+        }
+        const data = await response.json();
+        const normalized: TemplateOption[] = (data.templates ?? []).map((t: any) => ({
+          id: t.id,
+          name: t.name,
+          subject: t.subject,
+          filename: t.filename,
+        }));
+        if (!isMounted) {
+          return;
+        }
+        setTemplates(normalized);
+        if (normalized.length > 0) {
+          setSelectedTemplateId(normalized[0].id);
+          setEmailSubject(normalized[0].subject || "");
+          setSubjectManuallyEdited(false);
+        }
+      } catch (error) {
+        console.error("Error loading templates:", error);
+      }
+    }
+
+    loadTemplates();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const onFile = useCallback((file: File) => {
     const reader = new FileReader();
@@ -83,6 +153,21 @@ export default function TableEditor() {
 
   const handleBrowse = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleTemplateChange = (templateId: string) => {
+    setSendError(null);
+    setSendSuccess(null);
+    const previousTemplate = templates.find((t) => t.id === selectedTemplateId);
+    const nextTemplate = templates.find((t) => t.id === templateId);
+    setSelectedTemplateId(templateId);
+    if (
+      !subjectManuallyEdited ||
+      emailSubject.trim() === (previousTemplate?.subject ?? "").trim()
+    ) {
+      setEmailSubject(nextTemplate?.subject || "");
+      setSubjectManuallyEdited(false);
+    }
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -169,13 +254,116 @@ export default function TableEditor() {
     }
   };
 
-  const continueToSend = () => {
+  const handleSend = async () => {
+    setSendError(null);
+    setSendSuccess(null);
+
     const ok = validateData();
-    if (ok) {
-      // In a real app you'd route to the distribution page with data
-      setErrors([]);
-      setNotice("Continuing to send — (demo)");
-      setTimeout(() => setNotice(null), 3000);
+    if (!ok) {
+      setSendError("Please resolve the data validation issues before sending.");
+      return;
+    }
+
+    if (!selectedTemplateId) {
+      setSendError("Select an email template before sending.");
+      return;
+    }
+
+    if (data.length === 0) {
+      setSendError("Add at least one recipient row before sending.");
+      return;
+    }
+
+    const normalizedHeaders = headers.map((h) => (h || "").trim().toLowerCase());
+    if (!normalizedHeaders.includes("email")) {
+      setSendError('Your dataset must include an "email" column.');
+      return;
+    }
+    if (!normalizedHeaders.includes("recipient")) {
+      setSendError('Your dataset must include a "recipient" column.');
+      return;
+    }
+
+    const rows = data.map((row) => {
+      const record: Record<string, string> = {};
+      headers.forEach((header, index) => {
+        const key = (header ?? "").trim();
+        if (!key) return;
+        record[key] = row[index] ?? "";
+      });
+      return record;
+    });
+
+    setIsSending(true);
+    try {
+      const uploadResponse = await fetch(`${BACKEND_BASE_URL}/upload-json`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(rows),
+      });
+
+      if (!uploadResponse.ok) {
+        const message = await parseErrorResponse(uploadResponse);
+        throw new Error(message || "Failed to upload data to the backend.");
+      }
+
+      const uploadPayload = await uploadResponse.json();
+      const uploadId = uploadPayload?.upload_id;
+      if (!uploadId) {
+        throw new Error("Backend response missing upload_id.");
+      }
+
+      const ccList = ccInput
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      const payload: Record<string, unknown> = {
+        upload_id: uploadId,
+        with_attachments: withAttachments,
+        skip_sent: true,
+        cc_list: ccList,
+        template_id: selectedTemplateId,
+      };
+
+      if (emailSubject.trim()) {
+        payload.subject = emailSubject.trim();
+      }
+
+      const sendResponse = await fetch(`${BACKEND_BASE_URL}/emails/send-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      let sendPayload: any = null;
+      try {
+        sendPayload = await sendResponse.json();
+      } catch {
+        // ignore JSON parse errors; we'll handle message below
+      }
+
+      if (!sendResponse.ok) {
+        const message =
+          sendPayload?.detail ||
+          sendPayload?.error ||
+          sendPayload?.message ||
+          sendResponse.statusText;
+        throw new Error(message || "Failed to start bulk email job.");
+      }
+
+      const message =
+        sendPayload?.message ||
+        `Bulk email job started for ${
+          sendPayload?.row_count ?? rows.length
+        } recipient${rows.length === 1 ? "" : "s"}.`;
+
+      setSendSuccess(message);
+      setNotice(null);
+    } catch (error: any) {
+      setSendError(error?.message || "Failed to send emails.");
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -250,9 +438,17 @@ export default function TableEditor() {
                   </button>
                 </div>
               <div>
-                <button onClick={continueToSend} style={{ background: accent }} className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white">
+                <button
+                  onClick={handleSend}
+                  disabled={isSending || !selectedTemplateId}
+                  style={{
+                    background: accent,
+                    opacity: isSending || !selectedTemplateId ? 0.6 : 1,
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium text-white disabled:cursor-not-allowed"
+                >
                   <Send size={16} />
-                  Continue to Send
+                  {isSending ? "Sending..." : "Send Emails"}
                 </button>
               </div>
             </div>
@@ -341,15 +537,122 @@ export default function TableEditor() {
 
           {/* Sidebar */}
           <aside className="lg:col-span-1">
-            <div className="rounded-lg border p-4 shadow-sm sticky top-20 bg-white">
-              <h4 className="text-sm font-semibold">CSV Info</h4>
-              <div className="mt-3 text-sm text-slate-600">
-                <div>Rows: <strong>{data.length}</strong></div>
-                <div>Columns: <strong>{headers.length}</strong></div>
-                <div className="mt-2">Errors: <strong className="text-red-600">{errors.length}</strong></div>
+            <div className="space-y-4 sticky top-20">
+              <div className="rounded-lg border p-4 shadow-sm bg-white">
+                <h4 className="text-sm font-semibold">CSV Info</h4>
+                <div className="mt-3 text-sm text-slate-600">
+                  <div>Rows: <strong>{data.length}</strong></div>
+                  <div>Columns: <strong>{headers.length}</strong></div>
+                  <div className="mt-2">Errors: <strong className="text-red-600">{errors.length}</strong></div>
+                </div>
+                <div className="mt-4">
+                  <button onClick={() => { clearTableData(); setErrors([]); }} className="w-full px-3 py-2 rounded-md border text-sm">Re-upload CSV</button>
+                </div>
               </div>
-              <div className="mt-4">
-                <button onClick={() => { clearTableData(); setErrors([]); }} className="w-full px-3 py-2 rounded-md border text-sm">Re-upload CSV</button>
+
+              <div className="rounded-lg border p-4 shadow-sm bg-white">
+                <h4 className="text-sm font-semibold">Send Settings</h4>
+
+                <div className="mt-3">
+                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-wide">
+                    Template
+                  </label>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={(event) => handleTemplateChange(event.target.value)}
+                    className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm focus:border-slate-400 focus:outline-none"
+                  >
+                    <option value="" disabled>
+                      {templates.length === 0 ? "Loading templates..." : "Select a template"}
+                    </option>
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Templates are managed in the Template Editor.
+                  </p>
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-wide">
+                    Email Subject
+                  </label>
+                  <input
+                    value={emailSubject}
+                    onChange={(event) => {
+                      setEmailSubject(event.target.value);
+                      setSubjectManuallyEdited(true);
+                      setSendError(null);
+                      setSendSuccess(null);
+                    }}
+                    placeholder="Use template subject"
+                    className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm focus:border-slate-400 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const selected = templates.find((t) => t.id === selectedTemplateId);
+                      setEmailSubject(selected?.subject || "");
+                      setSubjectManuallyEdited(false);
+                      setSendError(null);
+                      setSendSuccess(null);
+                    }}
+                    className="mt-1 text-xs text-slate-500 underline"
+                  >
+                    Use template subject
+                  </button>
+                </div>
+
+                <div className="mt-4">
+                  <label className="block text-xs font-medium text-slate-500 uppercase tracking-wide">
+                    CC Emails
+                  </label>
+                  <input
+                    value={ccInput}
+                    onChange={(event) => {
+                      setCcInput(event.target.value);
+                      setSendError(null);
+                      setSendSuccess(null);
+                    }}
+                    placeholder="cc1@example.com, cc2@example.com"
+                    className="mt-1 w-full rounded-md border border-slate-200 px-2 py-2 text-sm focus:border-slate-400 focus:outline-none"
+                  />
+                </div>
+
+                <div className="mt-4 flex items-center gap-2">
+                  <input
+                    id="with-attachments"
+                    type="checkbox"
+                    checked={withAttachments}
+                    onChange={(event) => {
+                      setWithAttachments(event.target.checked);
+                      setSendError(null);
+                      setSendSuccess(null);
+                    }}
+                    className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+                  />
+                  <label htmlFor="with-attachments" className="text-sm text-slate-600">
+                    Attach matching PDFs (if available)
+                  </label>
+                </div>
+
+                <p className="mt-3 text-xs text-slate-500">
+                  Required columns: <code>recipient</code> and <code>email</code>.
+                </p>
+
+                {sendError ? (
+                  <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {sendError}
+                  </div>
+                ) : null}
+                {sendSuccess ? (
+                  <div className="mt-3 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                    {sendSuccess}
+                  </div>
+                ) : null}
               </div>
             </div>
           </aside>
